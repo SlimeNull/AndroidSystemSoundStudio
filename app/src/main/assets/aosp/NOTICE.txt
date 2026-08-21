@@ -1,0 +1,6 @@
+These audio assets are sourced from the Android Open Source Project:
+https://android.googlesource.com/platform/frameworks/base/+/refs/heads/main/data/sounds/effects/ogg/
+
+Android Open Source Project files are provided under the licenses stated by
+their upstream source tree. See https://source.android.com/docs/setup/about/licenses
+for Android Open Source Project licensing information.
