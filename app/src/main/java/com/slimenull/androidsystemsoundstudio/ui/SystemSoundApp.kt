@@ -57,10 +57,14 @@ import androidx.compose.material.icons.rounded.LibraryMusic
 import androidx.compose.material.icons.rounded.Lock
 import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MoreVert
+import androidx.compose.material.icons.rounded.Nfc
+import androidx.compose.material.icons.rounded.PhoneInTalk
 import androidx.compose.material.icons.rounded.PlayArrow
+import androidx.compose.material.icons.rounded.Screenshot
 import androidx.compose.material.icons.rounded.SelectAll
 import androidx.compose.material.icons.rounded.SpaceBar
 import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.rounded.Timer
 import androidx.compose.material.icons.rounded.TouchApp
 import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.AlertDialog
@@ -116,6 +120,9 @@ import com.slimenull.androidsystemsoundstudio.AppViewModel
 import com.slimenull.androidsystemsoundstudio.BuildConfig
 import com.slimenull.androidsystemsoundstudio.model.SoundAsset
 import com.slimenull.androidsystemsoundstudio.model.SoundCatalog
+import com.slimenull.androidsystemsoundstudio.model.SoundColor
+import com.slimenull.androidsystemsoundstudio.model.SoundGroup
+import com.slimenull.androidsystemsoundstudio.model.SoundIcon
 import com.slimenull.androidsystemsoundstudio.model.SoundTarget
 import kotlinx.coroutines.launch
 
@@ -123,15 +130,6 @@ private const val HOME_ROUTE = "home"
 private const val SOUND_MANAGER_ROUTE = "sound_manager"
 private const val PAGE_TRANSITION_MILLIS = 280
 private val AUDIO_MIME_TYPES = arrayOf("audio/*", "application/ogg")
-
-private data class SoundSection(val title: String, val targetIds: Set<String>)
-
-private val soundSections = listOf(
-    SoundSection("触控与输入", setOf("tick", "keypress", "spacebar", "delete", "return")),
-    SoundSection("锁定与电源", setOf("lock", "unlock", "charging", "wireless_charging", "low_battery")),
-    SoundSection("相机与录像", setOf("camera", "record_start", "record_stop")),
-    SoundSection("底座", setOf("dock", "undock")),
-)
 
 @Composable
 fun SystemSoundApp(viewModel: AppViewModel) {
@@ -255,6 +253,16 @@ private fun HomeScreen(
                                 onClick = { menuExpanded = false; onManage() },
                             )
                             DropdownMenuItem(
+                                text = { Text("显示不支持的声音") },
+                                trailingIcon = {
+                                    Checkbox(
+                                        checked = viewModel.uiState.showUnsupportedSounds,
+                                        onCheckedChange = null,
+                                    )
+                                },
+                                onClick = viewModel::toggleShowUnsupportedSounds,
+                            )
+                            DropdownMenuItem(
                                 text = { Text("关于") },
                                 leadingIcon = { Icon(Icons.Rounded.Info, null) },
                                 onClick = { menuExpanded = false; onAbout() },
@@ -283,15 +291,15 @@ private fun HomeScreen(
             modifier = Modifier.fillMaxSize().padding(padding),
             contentPadding = PaddingValues(bottom = 112.dp),
         ) {
-            soundSections.forEach { section ->
-                item(key = "header_${section.title}") {
-                    SoundSectionHeader(section.title)
-                }
-                items(
-                    items = SoundCatalog.targets.filter { it.id in section.targetIds },
-                    key = { it.id },
-                ) { target ->
-                    SoundTargetRow(target, viewModel, snackbar)
+            SoundGroup.values().forEach { group ->
+                val targets = viewModel.visibleTargets.filter { it.group == group }
+                if (targets.isNotEmpty()) {
+                    item(key = "header_${group.name}") {
+                        SoundSectionHeader(group.title)
+                    }
+                    items(items = targets, key = { it.id }) { target ->
+                        SoundTargetRow(target, viewModel, snackbar)
+                    }
                 }
             }
         }
@@ -337,8 +345,7 @@ private fun SoundTargetRow(
     var expanded by remember { mutableStateOf(false) }
     val choices = viewModel.allSounds.filter { target.id in it.categories }
     val selected = choices.firstOrNull { it.id == viewModel.uiState.selections[target.id] }
-    val previewSound = selected ?: choices.firstOrNull { it.builtIn }
-    val visual = soundVisual(target.id)
+    val visual = soundVisual(target)
 
     Card(
         modifier = Modifier
@@ -377,11 +384,27 @@ private fun SoundTargetRow(
             }
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    target.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.SemiBold,
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        target.title,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                    )
+                    if (!target.isAvailableOnDevice) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            "不支持",
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(MaterialTheme.colorScheme.errorContainer)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                    }
+                }
                 Spacer(Modifier.height(4.dp))
                 Text(
                     target.description,
@@ -402,11 +425,11 @@ private fun SoundTargetRow(
             Spacer(Modifier.width(8.dp))
             Column(horizontalAlignment = Alignment.End) {
                 SilentPreviewButton(
-                    enabled = previewSound != null,
+                    enabled = viewModel.canPreview(target),
                     containerColor = visual.containerColor,
                     contentColor = visual.contentColor,
                     onClick = {
-                        previewSound?.let(viewModel::preview)?.exceptionOrNull()?.let {
+                        viewModel.preview(target).exceptionOrNull()?.let {
                             snackbar.launchMessage(it.message ?: "无法播放该声音")
                         }
                     },
@@ -456,30 +479,36 @@ private data class SoundVisual(
 )
 
 @Composable
-private fun soundVisual(targetId: String): SoundVisual {
+private fun soundVisual(target: SoundTarget): SoundVisual {
     val isDark = androidx.compose.foundation.isSystemInDarkTheme()
-    val palette = when (targetId) {
-        "tick", "camera", "dock" -> if (isDark) Color(0xFF183D70) to Color(0xFFAEC7FF) else Color(0xFFE7EDFF) to Color(0xFF1657B8)
-        "keypress", "charging", "record_start" -> if (isDark) Color(0xFF173D2B) to Color(0xFF96D9AD) else Color(0xFFE4F3E9) to Color(0xFF087B3C)
-        "spacebar", "wireless_charging" -> if (isDark) Color(0xFF4A3012) to Color(0xFFFFC979) else Color(0xFFFFEFD9) to Color(0xFFC96D00)
-        "delete", "low_battery", "record_stop" -> if (isDark) Color(0xFF531F28) to Color(0xFFFFB2BC) else Color(0xFFFCE5E9) to Color(0xFFBD3041)
-        else -> if (isDark) Color(0xFF35275E) to Color(0xFFCBBEFF) else Color(0xFFEDE7FF) to Color(0xFF4930B8)
+    val palette = when (target.color) {
+        SoundColor.BLUE -> if (isDark) Color(0xFF183D70) to Color(0xFFAEC7FF) else Color(0xFFE7EDFF) to Color(0xFF1657B8)
+        SoundColor.GREEN -> if (isDark) Color(0xFF173D2B) to Color(0xFF96D9AD) else Color(0xFFE4F3E9) to Color(0xFF087B3C)
+        SoundColor.ORANGE -> if (isDark) Color(0xFF4A3012) to Color(0xFFFFC979) else Color(0xFFFFEFD9) to Color(0xFFC96D00)
+        SoundColor.RED -> if (isDark) Color(0xFF531F28) to Color(0xFFFFB2BC) else Color(0xFFFCE5E9) to Color(0xFFBD3041)
+        SoundColor.PURPLE -> if (isDark) Color(0xFF35275E) to Color(0xFFCBBEFF) else Color(0xFFEDE7FF) to Color(0xFF4930B8)
+        SoundColor.TEAL -> if (isDark) Color(0xFF123F3B) to Color(0xFF80D5CD) else Color(0xFFD9F3EF) to Color(0xFF006A64)
+        SoundColor.NEUTRAL -> if (isDark) Color(0xFF34363D) to Color(0xFFC5C6CF) else Color(0xFFE9E9F0) to Color(0xFF5E6069)
     }
-    val icon = when (targetId) {
-        "tick" -> Icons.Rounded.TouchApp
-        "keypress" -> Icons.Rounded.Keyboard
-        "spacebar" -> Icons.Rounded.SpaceBar
-        "delete" -> Icons.AutoMirrored.Rounded.Backspace
-        "return" -> Icons.AutoMirrored.Rounded.KeyboardReturn
-        "lock" -> Icons.Rounded.Lock
-        "unlock" -> Icons.Rounded.LockOpen
-        "charging", "wireless_charging" -> Icons.Rounded.BatteryChargingFull
-        "low_battery" -> Icons.Rounded.BatteryAlert
-        "camera" -> Icons.Rounded.CameraAlt
-        "record_start" -> Icons.Rounded.Videocam
-        "record_stop" -> Icons.Rounded.StopCircle
-        "dock", "undock" -> Icons.Rounded.Dock
-        else -> Icons.Rounded.LibraryMusic
+    val icon = when (target.icon) {
+        SoundIcon.TOUCH -> Icons.Rounded.TouchApp
+        SoundIcon.KEYBOARD -> Icons.Rounded.Keyboard
+        SoundIcon.SPACE -> Icons.Rounded.SpaceBar
+        SoundIcon.BACKSPACE -> Icons.AutoMirrored.Rounded.Backspace
+        SoundIcon.RETURN -> Icons.AutoMirrored.Rounded.KeyboardReturn
+        SoundIcon.LOCK -> Icons.Rounded.Lock
+        SoundIcon.UNLOCK -> Icons.Rounded.LockOpen
+        SoundIcon.CHARGING -> Icons.Rounded.BatteryChargingFull
+        SoundIcon.BATTERY -> Icons.Rounded.BatteryAlert
+        SoundIcon.CAMERA -> Icons.Rounded.CameraAlt
+        SoundIcon.TIMER -> Icons.Rounded.Timer
+        SoundIcon.SCREENSHOT -> Icons.Rounded.Screenshot
+        SoundIcon.VIDEO -> Icons.Rounded.Videocam
+        SoundIcon.STOP -> Icons.Rounded.StopCircle
+        SoundIcon.DOCK -> Icons.Rounded.Dock
+        SoundIcon.CALL -> Icons.Rounded.PhoneInTalk
+        SoundIcon.NFC -> Icons.Rounded.Nfc
+        SoundIcon.GENERIC -> Icons.Rounded.LibraryMusic
     }
     return SoundVisual(icon, palette.first, palette.second)
 }
@@ -586,6 +615,7 @@ private fun SoundManagerScreen(
                 items(viewModel.uiState.customSounds, key = { it.id }) { sound ->
                     SoundAssetCard(
                         sound = sound,
+                        targets = viewModel.allTargets,
                         onPreview = {
                             viewModel.preview(sound).exceptionOrNull()?.let {
                                 snackbar.launchMessage(it.message ?: "无法播放该声音")
@@ -616,13 +646,16 @@ private fun SoundManagerScreen(
 @Composable
 private fun SoundAssetCard(
     sound: SoundAsset,
+    targets: List<SoundTarget>,
     onPreview: () -> Unit,
     onEdit: () -> Unit,
     onDelete: () -> Unit,
 ) {
-    val visual = soundVisual(sound.categories.firstOrNull().orEmpty())
+    val primaryTarget = targets.firstOrNull { it.id in sound.categories }
+        ?: SoundCatalog.defaultPlaceholder
+    val visual = soundVisual(primaryTarget)
     val categoryNames = sound.categories.mapNotNull { id ->
-        SoundCatalog.targets.firstOrNull { it.id == id }?.title
+        targets.firstOrNull { it.id == id }?.title
     }.joinToString("、")
 
     Card(
@@ -785,7 +818,7 @@ private fun CategoryDialog(viewModel: AppViewModel, snackbar: SnackbarHostState)
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(
                         enabled = !isSaving,
-                        onClick = { selected = SoundCatalog.targets.map { it.id }.toSet() },
+                        onClick = { selected = viewModel.allTargets.map { it.id }.toSet() },
                     ) {
                         Icon(Icons.Rounded.SelectAll, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
@@ -798,7 +831,7 @@ private fun CategoryDialog(viewModel: AppViewModel, snackbar: SnackbarHostState)
                     }
                 }
                 LazyColumn(modifier = Modifier.fillMaxWidth().height(360.dp)) {
-                    items(SoundCatalog.targets, key = { it.id }) { target ->
+                    items(viewModel.allTargets, key = { it.id }) { target ->
                         Row(
                             modifier = Modifier.fillMaxWidth().clickable(enabled = !isSaving) {
                                 selected = if (target.id in selected) selected - target.id else selected + target.id

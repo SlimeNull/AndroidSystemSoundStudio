@@ -12,6 +12,7 @@ import java.util.UUID
 class SoundRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences("sound_studio", Context.MODE_PRIVATE)
     private val soundDirectory = File(context.filesDir, "sounds").apply { mkdirs() }
+    private val systemSoundDirectory = File(SYSTEM_SOUND_DIRECTORY)
 
     val supportsAudioConversion: Boolean
         get() = OggAudioTranscoder.isAvailable
@@ -45,6 +46,22 @@ class SoundRepository(private val context: Context) {
             val json = JSONObject(raw)
             json.keys().asSequence().associateWith { json.getString(it) }
         }.getOrDefault(emptyMap())
+    }
+
+    fun loadSystemSoundFileNames(): Set<String>? {
+        val files = systemSoundDirectory.listFiles() ?: return null
+        return files.asSequence()
+            .filter(File::isFile)
+            .map(File::getName)
+            .filter(::isSupportedAudioFile)
+            .toSet()
+    }
+
+    fun loadShowUnsupportedSounds(): Boolean =
+        preferences.getBoolean(KEY_SHOW_UNSUPPORTED_SOUNDS, false)
+
+    fun saveShowUnsupportedSounds(show: Boolean) {
+        preferences.edit().putBoolean(KEY_SHOW_UNSUPPORTED_SOUNDS, show).apply()
     }
 
     fun importSound(uri: Uri, displayName: String, categories: Set<String>): SoundAsset {
@@ -100,6 +117,11 @@ class SoundRepository(private val context: Context) {
         File(soundDirectory, sound.storedFileName).inputStream()
     }
 
+    fun openSystemSound(fileName: String) =
+        File(systemSoundDirectory, fileName).also { file ->
+            require(file.name == fileName && file.isFile && file.canRead()) { "无法读取设备系统声音" }
+        }.inputStream()
+
     private fun copyUri(uri: Uri, destination: File) {
         context.contentResolver.openInputStream(uri).use { input ->
             requireNotNull(input) { "无法读取所选文件" }
@@ -110,6 +132,8 @@ class SoundRepository(private val context: Context) {
     companion object {
         private const val KEY_SOUNDS = "custom_sounds"
         private const val KEY_SELECTIONS = "selections"
+        private const val KEY_SHOW_UNSUPPORTED_SOUNDS = "show_unsupported_sounds"
+        private const val SYSTEM_SOUND_DIRECTORY = "/product/media/audio/ui"
 
         private val SUPPORTED_EXTENSIONS = setOf(
             "ogg",

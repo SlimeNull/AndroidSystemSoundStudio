@@ -3,7 +3,7 @@ package com.slimenull.androidsystemsoundstudio.data
 import android.content.Context
 import android.net.Uri
 import com.slimenull.androidsystemsoundstudio.model.SoundAsset
-import com.slimenull.androidsystemsoundstudio.model.SoundCatalog
+import com.slimenull.androidsystemsoundstudio.model.SoundTarget
 import java.util.zip.ZipEntry
 import java.util.zip.ZipOutputStream
 
@@ -11,8 +11,13 @@ class ModuleExporter(
     private val context: Context,
     private val repository: SoundRepository,
 ) {
-    fun export(uri: Uri, selections: Map<String, String>, sounds: List<SoundAsset>): Int {
-        val selectedTargets = resolveSelections(selections, sounds)
+    fun export(
+        uri: Uri,
+        selections: Map<String, String>,
+        sounds: List<SoundAsset>,
+        targets: List<SoundTarget>,
+    ): Int {
+        val selectedTargets = resolveSelections(selections, sounds, targets)
         require(selectedTargets.isNotEmpty()) { "请先为至少一个项目选择声音" }
 
         context.contentResolver.openOutputStream(uri, "w").use { rawOutput ->
@@ -59,7 +64,8 @@ class ModuleExporter(
 internal fun resolveSelections(
     selections: Map<String, String>,
     sounds: List<SoundAsset>,
-) = SoundCatalog.targets.mapNotNull { target ->
+    targets: List<SoundTarget>,
+) = targets.mapNotNull { target ->
     val soundId = selections[target.id] ?: return@mapNotNull null
     sounds.firstOrNull { it.id == soundId && target.id in it.categories }?.let { target to it }
 }

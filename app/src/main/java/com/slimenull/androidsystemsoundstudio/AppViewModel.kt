@@ -12,6 +12,7 @@ import com.slimenull.androidsystemsoundstudio.data.ModuleExporter
 import com.slimenull.androidsystemsoundstudio.data.SoundRepository
 import com.slimenull.androidsystemsoundstudio.model.SoundAsset
 import com.slimenull.androidsystemsoundstudio.model.SoundCatalog
+import com.slimenull.androidsystemsoundstudio.model.SoundTarget
 import java.io.File
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -23,6 +24,7 @@ data class AppUiState(
     val pendingImport: PendingImport? = null,
     val editingSound: SoundAsset? = null,
     val isSavingSound: Boolean = false,
+    val showUnsupportedSounds: Boolean = false,
 )
 
 data class PendingImport(val uri: Uri, val displayName: String)
@@ -30,6 +32,7 @@ data class PendingImport(val uri: Uri, val displayName: String)
 class AppViewModel(application: Application) : AndroidViewModel(application) {
     private val repository = SoundRepository(application)
     private val exporter = ModuleExporter(application, repository)
+    private val deviceSoundFileNames = repository.loadSystemSoundFileNames()
     private var player: MediaPlayer? = null
     private var previewFile: File? = null
 
@@ -37,12 +40,19 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         AppUiState(
             customSounds = repository.loadCustomSounds(),
             selections = repository.loadSelections(),
+            showUnsupportedSounds = repository.loadShowUnsupportedSounds(),
         ),
     )
         private set
 
     val allSounds: List<SoundAsset>
         get() = SoundCatalog.builtIns() + uiState.customSounds
+
+    val allTargets: List<SoundTarget>
+        get() = SoundCatalog.targetsForDevice(deviceSoundFileNames, includeUnsupported = true)
+
+    val visibleTargets: List<SoundTarget>
+        get() = SoundCatalog.targetsForDevice(deviceSoundFileNames, uiState.showUnsupportedSounds)
 
     val supportsAudioConversion: Boolean
         get() = repository.supportsAudioConversion
@@ -53,6 +63,12 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         }
         uiState = uiState.copy(selections = updated)
         repository.saveSelections(updated)
+    }
+
+    fun toggleShowUnsupportedSounds() {
+        val show = !uiState.showUnsupportedSounds
+        uiState = uiState.copy(showUnsupportedSounds = show)
+        repository.saveShowUnsupportedSounds(show)
     }
 
     fun beginImport(uri: Uri, displayName: String) {
@@ -129,14 +145,38 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun export(uri: Uri): Result<Int> = runCatching {
-        exporter.export(uri, uiState.selections, allSounds)
+        exporter.export(uri, uiState.selections, allSounds, allTargets)
     }
 
-    fun preview(sound: SoundAsset): Result<Unit> = runCatching {
+    fun preview(sound: SoundAsset): Result<Unit> = playPreview { repository.open(sound) }
+
+    fun canPreview(target: SoundTarget): Boolean =
+        target.isAvailableOnDevice ||
+            uiState.selections[target.id]?.let { selectedId ->
+                allSounds.any { it.id == selectedId && target.id in it.categories }
+            } == true ||
+            allSounds.any { it.builtIn && target.id in it.categories }
+
+    fun preview(target: SoundTarget): Result<Unit> {
+        val selected = uiState.selections[target.id]?.let { selectedId ->
+            allSounds.firstOrNull { it.id == selectedId && target.id in it.categories }
+        }
+        if (selected != null) return preview(selected)
+
+        val builtIn = allSounds.firstOrNull { it.builtIn && target.id in it.categories }
+        if (target.isAvailableOnDevice) {
+            val systemResult = playPreview { repository.openSystemSound(target.fileName) }
+            if (systemResult.isSuccess || builtIn == null) return systemResult
+        }
+        return builtIn?.let(::preview)
+            ?: Result.failure(IllegalStateException("当前声音无法试听"))
+    }
+
+    private fun playPreview(openInput: () -> java.io.InputStream): Result<Unit> = runCatching {
         player?.release()
         previewFile?.delete()
         val file = File.createTempFile("preview_", ".ogg", getApplication<Application>().cacheDir)
-        repository.open(sound).use { input -> file.outputStream().use(input::copyTo) }
+        openInput().use { input -> file.outputStream().use(input::copyTo) }
         previewFile = file
         player = MediaPlayer().apply {
             setDataSource(file.absolutePath)
