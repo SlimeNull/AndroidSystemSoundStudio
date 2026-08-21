@@ -3,9 +3,13 @@ package com.slimenull.androidsystemsoundstudio.ui
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
-import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.slideOutHorizontally
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -64,6 +68,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.navigation.compose.NavHost
+import androidx.navigation.compose.composable
+import androidx.navigation.compose.rememberNavController
 import com.slimenull.androidsystemsoundstudio.AppViewModel
 import com.slimenull.androidsystemsoundstudio.BuildConfig
 import com.slimenull.androidsystemsoundstudio.model.SoundAsset
@@ -71,7 +78,9 @@ import com.slimenull.androidsystemsoundstudio.model.SoundCatalog
 import com.slimenull.androidsystemsoundstudio.model.SoundTarget
 import kotlinx.coroutines.launch
 
-private enum class Screen { Home, SoundManager }
+private const val HOME_ROUTE = "home"
+private const val SOUND_MANAGER_ROUTE = "sound_manager"
+private const val PAGE_TRANSITION_MILLIS = 280
 
 private data class SoundSection(val title: String, val targetIds: Set<String>)
 
@@ -84,27 +93,58 @@ private val soundSections = listOf(
 
 @Composable
 fun SystemSoundApp(viewModel: AppViewModel) {
-    var screen by rememberSaveable { mutableStateOf(Screen.Home) }
     var showAbout by rememberSaveable { mutableStateOf(false) }
     val snackbar = remember { SnackbarHostState() }
-
-    BackHandler(enabled = screen == Screen.SoundManager) {
-        screen = Screen.Home
-    }
+    val navController = rememberNavController()
 
     SystemSoundTheme {
-        when (screen) {
-            Screen.Home -> HomeScreen(
-                viewModel = viewModel,
-                snackbar = snackbar,
-                onManage = { screen = Screen.SoundManager },
-                onAbout = { showAbout = true },
-            )
-            Screen.SoundManager -> SoundManagerScreen(
-                viewModel = viewModel,
-                snackbar = snackbar,
-                onBack = { screen = Screen.Home },
-            )
+        NavHost(
+            navController = navController,
+            startDestination = HOME_ROUTE,
+            enterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS),
+                    initialOffsetX = { it / 4 },
+                ) + fadeIn(animationSpec = tween(PAGE_TRANSITION_MILLIS))
+            },
+            exitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS),
+                    targetOffsetX = { -it / 10 },
+                ) + fadeOut(animationSpec = tween(PAGE_TRANSITION_MILLIS / 2))
+            },
+            popEnterTransition = {
+                slideInHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS),
+                    initialOffsetX = { -it / 10 },
+                ) + fadeIn(animationSpec = tween(PAGE_TRANSITION_MILLIS))
+            },
+            popExitTransition = {
+                slideOutHorizontally(
+                    animationSpec = tween(PAGE_TRANSITION_MILLIS),
+                    targetOffsetX = { it / 4 },
+                ) + fadeOut(animationSpec = tween(PAGE_TRANSITION_MILLIS / 2))
+            },
+        ) {
+            composable(HOME_ROUTE) {
+                HomeScreen(
+                    viewModel = viewModel,
+                    snackbar = snackbar,
+                    onManage = {
+                        navController.navigate(SOUND_MANAGER_ROUTE) {
+                            launchSingleTop = true
+                        }
+                    },
+                    onAbout = { showAbout = true },
+                )
+            }
+            composable(SOUND_MANAGER_ROUTE) {
+                SoundManagerScreen(
+                    viewModel = viewModel,
+                    snackbar = snackbar,
+                    onBack = { navController.popBackStack() },
+                )
+            }
         }
         if (showAbout) AboutDialog { showAbout = false }
         if (viewModel.uiState.pendingImport != null || viewModel.uiState.editingSound != null) {
