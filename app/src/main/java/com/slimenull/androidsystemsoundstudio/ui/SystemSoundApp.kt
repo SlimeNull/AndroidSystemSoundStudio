@@ -10,7 +10,14 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.LocalIndication
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.indication
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,54 +27,91 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.rounded.ArrowBack
+import androidx.compose.material.icons.automirrored.rounded.Backspace
+import androidx.compose.material.icons.automirrored.rounded.KeyboardReturn
+import androidx.compose.material.icons.rounded.Apps
+import androidx.compose.material.icons.rounded.ArrowDropDown
+import androidx.compose.material.icons.rounded.BatteryAlert
+import androidx.compose.material.icons.rounded.BatteryChargingFull
+import androidx.compose.material.icons.rounded.CameraAlt
 import androidx.compose.material.icons.rounded.Check
 import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Delete
+import androidx.compose.material.icons.rounded.Dock
 import androidx.compose.material.icons.rounded.Edit
 import androidx.compose.material.icons.rounded.FileDownload
 import androidx.compose.material.icons.rounded.FileUpload
 import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Keyboard
 import androidx.compose.material.icons.rounded.LibraryMusic
+import androidx.compose.material.icons.rounded.Lock
+import androidx.compose.material.icons.rounded.LockOpen
 import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material.icons.rounded.SelectAll
+import androidx.compose.material.icons.rounded.SpaceBar
+import androidx.compose.material.icons.rounded.StopCircle
+import androidx.compose.material.icons.rounded.TouchApp
+import androidx.compose.material.icons.rounded.Videocam
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
+import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.FilledTonalIconButton
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.ListItem
+import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.viewmodel.compose.viewModel
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
@@ -153,6 +197,13 @@ fun SystemSoundApp(viewModel: AppViewModel) {
     }
 }
 
+@Preview
+@Composable
+fun SystemSoundAppPreview() {
+    val appViewModel: AppViewModel = viewModel()
+    SystemSoundApp(appViewModel)
+}
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun HomeScreen(
@@ -179,17 +230,21 @@ private fun HomeScreen(
             TopAppBar(
                 title = {
                     Column {
-                        Text("系统声音工坊", fontWeight = FontWeight.SemiBold)
+                        Text(
+                            "系统声音工坊",
+                            style = MaterialTheme.typography.headlineSmall,
+                            fontWeight = FontWeight.Bold,
+                        )
                         Text(
                             "选择并导出系统 UI 音效",
-                            style = MaterialTheme.typography.labelMedium,
+                            style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 },
                 actions = {
                     Box {
-                        IconButton(onClick = { menuExpanded = true }) {
+                        FilledTonalIconButton(onClick = { menuExpanded = true }) {
                             Icon(Icons.Rounded.MoreVert, contentDescription = "更多")
                         }
                         DropdownMenu(
@@ -219,28 +274,26 @@ private fun HomeScreen(
                 text = { Text("导出模块") },
                 icon = { Icon(Icons.Rounded.FileDownload, null) },
                 onClick = { exportLauncher.launch("SystemSoundStudio-${BuildConfig.VERSION_NAME}.zip") },
+                containerColor = MaterialTheme.colorScheme.primary,
+                contentColor = MaterialTheme.colorScheme.onPrimary,
+                shape = RoundedCornerShape(20.dp),
             )
         },
+        containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
         LazyColumn(
             modifier = Modifier.fillMaxSize().padding(padding),
-            contentPadding = PaddingValues(bottom = 96.dp),
+            contentPadding = PaddingValues(bottom = 112.dp),
         ) {
             soundSections.forEach { section ->
                 item(key = "header_${section.title}") {
-                    Text(
-                        section.title,
-                        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 20.dp, bottom = 6.dp),
-                        style = MaterialTheme.typography.labelLarge,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontWeight = FontWeight.Medium,
-                    )
+                    SoundSectionHeader(section.title)
                 }
                 items(
                     items = SoundCatalog.targets.filter { it.id in section.targetIds },
                     key = { it.id },
                 ) { target ->
-                    SoundTargetRow(target, viewModel)
+                    SoundTargetRow(target, viewModel, snackbar)
                 }
             }
         }
@@ -248,52 +301,189 @@ private fun HomeScreen(
 }
 
 @Composable
-private fun SoundTargetRow(target: SoundTarget, viewModel: AppViewModel) {
+private fun SoundSectionHeader(title: String) {
+    Row(
+        modifier = Modifier.padding(start = 24.dp, end = 24.dp, top = 24.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Box(
+            modifier = Modifier
+                .size(32.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(MaterialTheme.colorScheme.primaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(
+                Icons.Rounded.Apps,
+                contentDescription = null,
+                modifier = Modifier.size(20.dp),
+                tint = MaterialTheme.colorScheme.primary,
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            title,
+            style = MaterialTheme.typography.titleMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            fontWeight = FontWeight.SemiBold,
+        )
+    }
+}
+
+@Composable
+private fun SoundTargetRow(
+    target: SoundTarget,
+    viewModel: AppViewModel,
+    snackbar: SnackbarHostState,
+) {
     var expanded by remember { mutableStateOf(false) }
     val choices = viewModel.allSounds.filter { target.id in it.categories }
     val selected = choices.firstOrNull { it.id == viewModel.uiState.selections[target.id] }
-    ListItem(
-        headlineContent = { Text(target.title, fontWeight = FontWeight.Medium) },
-        supportingContent = {
-            Column {
-                Text(target.description)
+    val previewSound = selected ?: choices.firstOrNull { it.builtIn }
+    val visual = soundVisual(target.id)
+
+    Card(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 128.dp)
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(visual.containerColor),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    visual.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = visual.contentColor,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    "/product/media/audio/ui/${target.fileName}",
-                    style = MaterialTheme.typography.labelSmall,
+                    target.title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    target.description,
+                    style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
                 )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    target.fileName,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.tertiary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
             }
-        },
-        trailingContent = {
-            Box {
-                Surface(
-                    modifier = Modifier.width(148.dp).clickable { expanded = true },
-                    shape = MaterialTheme.shapes.small,
-                    color = MaterialTheme.colorScheme.secondaryContainer,
-                ) {
-                    Text(
-                        selected?.displayName ?: "默认值",
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        style = MaterialTheme.typography.labelLarge,
-                    )
-                }
-                DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                    SoundChoiceItem("默认值", selected == null) {
-                        viewModel.select(target.id, null); expanded = false
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                SilentPreviewButton(
+                    enabled = previewSound != null,
+                    containerColor = visual.containerColor,
+                    contentColor = visual.contentColor,
+                    onClick = {
+                        previewSound?.let(viewModel::preview)?.exceptionOrNull()?.let {
+                            snackbar.launchMessage(it.message ?: "无法播放该声音")
+                        }
+                    },
+                )
+                Spacer(Modifier.height(10.dp))
+                Box {
+                    OutlinedButton(
+                        onClick = { expanded = true },
+                        modifier = Modifier.width(104.dp),
+                        shape = RoundedCornerShape(12.dp),
+                        contentPadding = PaddingValues(horizontal = 10.dp),
+                    ) {
+                        Text(
+                            selected?.displayName ?: "默认值",
+                            modifier = Modifier.weight(1f),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                        )
+                        Icon(
+                            Icons.Rounded.ArrowDropDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp),
+                        )
                     }
-                    choices.forEach { sound ->
-                        SoundChoiceItem(sound.displayName, sound.id == selected?.id) {
-                            viewModel.select(target.id, sound.id); expanded = false
+                    DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                        SoundChoiceItem("默认值", selected == null) {
+                            viewModel.select(target.id, null)
+                            expanded = false
+                        }
+                        choices.forEach { sound ->
+                            SoundChoiceItem(sound.displayName, sound.id == selected?.id) {
+                                viewModel.select(target.id, sound.id)
+                                expanded = false
+                            }
                         }
                     }
                 }
             }
-        },
-    )
+        }
+    }
+}
+
+private data class SoundVisual(
+    val icon: ImageVector,
+    val containerColor: Color,
+    val contentColor: Color,
+)
+
+@Composable
+private fun soundVisual(targetId: String): SoundVisual {
+    val isDark = androidx.compose.foundation.isSystemInDarkTheme()
+    val palette = when (targetId) {
+        "tick", "camera", "dock" -> if (isDark) Color(0xFF183D70) to Color(0xFFAEC7FF) else Color(0xFFE7EDFF) to Color(0xFF1657B8)
+        "keypress", "charging", "record_start" -> if (isDark) Color(0xFF173D2B) to Color(0xFF96D9AD) else Color(0xFFE4F3E9) to Color(0xFF087B3C)
+        "spacebar", "wireless_charging" -> if (isDark) Color(0xFF4A3012) to Color(0xFFFFC979) else Color(0xFFFFEFD9) to Color(0xFFC96D00)
+        "delete", "low_battery", "record_stop" -> if (isDark) Color(0xFF531F28) to Color(0xFFFFB2BC) else Color(0xFFFCE5E9) to Color(0xFFBD3041)
+        else -> if (isDark) Color(0xFF35275E) to Color(0xFFCBBEFF) else Color(0xFFEDE7FF) to Color(0xFF4930B8)
+    }
+    val icon = when (targetId) {
+        "tick" -> Icons.Rounded.TouchApp
+        "keypress" -> Icons.Rounded.Keyboard
+        "spacebar" -> Icons.Rounded.SpaceBar
+        "delete" -> Icons.AutoMirrored.Rounded.Backspace
+        "return" -> Icons.AutoMirrored.Rounded.KeyboardReturn
+        "lock" -> Icons.Rounded.Lock
+        "unlock" -> Icons.Rounded.LockOpen
+        "charging", "wireless_charging" -> Icons.Rounded.BatteryChargingFull
+        "low_battery" -> Icons.Rounded.BatteryAlert
+        "camera" -> Icons.Rounded.CameraAlt
+        "record_start" -> Icons.Rounded.Videocam
+        "record_stop" -> Icons.Rounded.StopCircle
+        "dock", "undock" -> Icons.Rounded.Dock
+        else -> Icons.Rounded.LibraryMusic
+    }
+    return SoundVisual(icon, palette.first, palette.second)
 }
 
 @Composable
@@ -328,7 +518,7 @@ private fun SoundManagerScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            TopAppBar(
+            CenterAlignedTopAppBar(
                 title = { Text("声音管理", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -368,41 +558,61 @@ private fun SoundManagerScreen(
                     "导入 OGG 文件后，可在这里维护它所属的声音分类。",
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+                Spacer(Modifier.height(24.dp))
+                FilledTonalButton(
+                    onClick = { importLauncher.launch(arrayOf("audio/ogg", "application/ogg", "audio/*")) },
+                ) {
+                    Icon(Icons.Rounded.FileUpload, contentDescription = null)
+                    Spacer(Modifier.width(8.dp))
+                    Text("导入声音")
+                }
             }
         } else {
             LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
                 items(viewModel.uiState.customSounds, key = { it.id }) { sound ->
-                    ListItem(
-                        headlineContent = { Text(sound.displayName, fontWeight = FontWeight.Medium) },
-                        supportingContent = {
-                            Text(
-                                sound.categories.mapNotNull { id ->
-                                    SoundCatalog.targets.firstOrNull { it.id == id }?.title
-                                }.joinToString("、"),
-                                maxLines = 2,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        },
-                        trailingContent = {
-                            Row {
-                                IconButton(onClick = {
-                                    viewModel.preview(sound).exceptionOrNull()?.let {
-                                        snackbar.launchMessage(it.message ?: "无法播放该声音")
-                                    }
-                                }) { Icon(Icons.Rounded.PlayArrow, contentDescription = "试听") }
-                                IconButton(onClick = { viewModel.editCategories(sound) }) {
-                                    Icon(Icons.Rounded.Edit, contentDescription = "变更分类")
-                                }
-                                IconButton(onClick = { deleting = sound }) {
-                                    Icon(
-                                        Icons.Rounded.Delete,
-                                        contentDescription = "删除",
-                                        tint = MaterialTheme.colorScheme.error,
+                    Column {
+                        ListItem(
+                            headlineContent = { Text(sound.displayName, fontWeight = FontWeight.Medium) },
+                            supportingContent = {
+                                Text(
+                                    sound.categories.mapNotNull { id ->
+                                        SoundCatalog.targets.firstOrNull { it.id == id }?.title
+                                    }.joinToString("、"),
+                                    maxLines = 2,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            },
+                            trailingContent = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    SilentPreviewButton(
+                                        enabled = true,
+                                        onClick = {
+                                            viewModel.preview(sound).exceptionOrNull()?.let {
+                                                snackbar.launchMessage(it.message ?: "无法播放该声音")
+                                            }
+                                        },
                                     )
+                                    IconButton(onClick = { viewModel.editCategories(sound) }) {
+                                        Icon(Icons.Rounded.Edit, contentDescription = "变更分类")
+                                    }
+                                    IconButton(onClick = { deleting = sound }) {
+                                        Icon(
+                                            Icons.Rounded.Delete,
+                                            contentDescription = "删除",
+                                            tint = MaterialTheme.colorScheme.error,
+                                        )
+                                    }
                                 }
-                            }
-                        },
-                    )
+                            },
+                            colors = ListItemDefaults.colors(
+                                containerColor = MaterialTheme.colorScheme.surface,
+                            ),
+                        )
+                        HorizontalDivider(
+                            modifier = Modifier.padding(start = 16.dp),
+                            color = MaterialTheme.colorScheme.outlineVariant,
+                        )
+                    }
                 }
             }
         }
@@ -418,6 +628,74 @@ private fun SoundManagerScreen(
                 TextButton(onClick = { viewModel.delete(sound); deleting = null }) { Text("删除") }
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
+        )
+    }
+}
+
+@Composable
+private fun SilentPreviewButton(
+    enabled: Boolean,
+    containerColor: Color = MaterialTheme.colorScheme.secondaryContainer,
+    contentColor: Color = MaterialTheme.colorScheme.onSecondaryContainer,
+    onClick: () -> Unit,
+) {
+    val currentOnClick by rememberUpdatedState(onClick)
+    val interactionSource = remember { MutableInteractionSource() }
+    val indication = LocalIndication.current
+    val pointerModifier = if (enabled) {
+        Modifier.pointerInput(interactionSource) {
+            detectTapGestures(
+                onPress = { position ->
+                    val press = PressInteraction.Press(position)
+                    interactionSource.emit(press)
+                    if (tryAwaitRelease()) {
+                        interactionSource.emit(PressInteraction.Release(press))
+                    } else {
+                        interactionSource.emit(PressInteraction.Cancel(press))
+                    }
+                },
+                onTap = { currentOnClick() },
+            )
+        }
+    } else {
+        Modifier
+    }
+
+    Box(
+        modifier = Modifier
+            .size(40.dp)
+            .clip(CircleShape)
+            .background(
+                if (enabled) {
+                    containerColor
+                } else {
+                    MaterialTheme.colorScheme.surfaceContainerHighest
+                },
+            )
+            .indication(interactionSource, indication)
+            .then(pointerModifier)
+            .semantics {
+                role = Role.Button
+                contentDescription = if (enabled) "试听" else "默认值无法试听"
+                if (enabled) {
+                    onClick(label = "试听") {
+                        currentOnClick()
+                        true
+                    }
+                } else {
+                    disabled()
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Icon(
+            Icons.Rounded.PlayArrow,
+            contentDescription = null,
+            tint = if (enabled) {
+                contentColor
+            } else {
+                MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+            },
         )
     }
 }
