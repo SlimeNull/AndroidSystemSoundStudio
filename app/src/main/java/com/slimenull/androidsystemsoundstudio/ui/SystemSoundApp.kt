@@ -67,18 +67,15 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
-import androidx.compose.material3.CenterAlignedTopAppBar
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.ExtendedFloatingActionButton
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilledTonalIconButton
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
-import androidx.compose.material3.ListItem
-import androidx.compose.material3.ListItemDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Scaffold
@@ -125,6 +122,7 @@ import kotlinx.coroutines.launch
 private const val HOME_ROUTE = "home"
 private const val SOUND_MANAGER_ROUTE = "sound_manager"
 private const val PAGE_TRANSITION_MILLIS = 280
+private val AUDIO_MIME_TYPES = arrayOf("audio/*", "application/ogg")
 
 private data class SoundSection(val title: String, val targetIds: Set<String>)
 
@@ -507,18 +505,23 @@ private fun SoundManagerScreen(
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri != null) {
             val name = context.displayName(uri)
-            if (!name.endsWith(".ogg", ignoreCase = true)) {
-                snackbar.launchMessage("请选择 OGG 格式的音频文件")
-            } else {
-                viewModel.beginImport(uri, name)
+            when {
+                !viewModel.isSupportedAudioFile(name) -> {
+                    snackbar.launchMessage("支持 OGG、MP3、WAV、M4A、AAC 和 FLAC 音频")
+                }
+                !viewModel.supportsImport(name) -> {
+                    snackbar.launchMessage("当前设备不支持将该格式转换为 OGG")
+                }
+                else -> viewModel.beginImport(uri, name)
             }
         }
     }
+    val openAudioPicker = { importLauncher.launch(AUDIO_MIME_TYPES) }
 
     Scaffold(
         snackbarHost = { SnackbarHost(snackbar) },
         topBar = {
-            CenterAlignedTopAppBar(
+            TopAppBar(
                 title = { Text("声音管理", fontWeight = FontWeight.SemiBold) },
                 navigationIcon = {
                     IconButton(onClick = onBack) {
@@ -526,18 +529,17 @@ private fun SoundManagerScreen(
                     }
                 },
                 actions = {
-                    TextButton(
-                        onClick = { importLauncher.launch(arrayOf("audio/ogg", "application/ogg", "audio/*")) },
-                        contentPadding = PaddingValues(horizontal = 14.dp),
-                    ) {
-                        Icon(Icons.Rounded.FileUpload, null, modifier = Modifier.size(18.dp))
-                        Spacer(Modifier.width(8.dp))
-                        Text("导入")
+                    FilledTonalIconButton(onClick = openAudioPicker) {
+                        Icon(Icons.Rounded.FileUpload, contentDescription = "导入声音")
                     }
                     Spacer(Modifier.width(8.dp))
                 },
+                colors = TopAppBarDefaults.topAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                ),
             )
         },
+        containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
         if (viewModel.uiState.customSounds.isEmpty()) {
             Column(
@@ -548,19 +550,27 @@ private fun SoundManagerScreen(
                 Icon(
                     Icons.Rounded.LibraryMusic,
                     null,
-                    modifier = Modifier.size(48.dp),
-                    tint = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier
+                        .size(72.dp)
+                        .clip(RoundedCornerShape(22.dp))
+                        .background(MaterialTheme.colorScheme.primaryContainer)
+                        .padding(18.dp),
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
                 )
                 Spacer(Modifier.height(16.dp))
                 Text("还没有导入声音", style = MaterialTheme.typography.titleMedium)
                 Spacer(Modifier.height(6.dp))
                 Text(
-                    "导入 OGG 文件后，可在这里维护它所属的声音分类。",
+                    if (viewModel.supportsAudioConversion) {
+                        "导入 OGG、MP3、WAV 等音频后，可在这里维护声音分类。"
+                    } else {
+                        "导入 OGG 文件后，可在这里维护它所属的声音分类。"
+                    },
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
                 Spacer(Modifier.height(24.dp))
                 FilledTonalButton(
-                    onClick = { importLauncher.launch(arrayOf("audio/ogg", "application/ogg", "audio/*")) },
+                    onClick = openAudioPicker,
                 ) {
                     Icon(Icons.Rounded.FileUpload, contentDescription = null)
                     Spacer(Modifier.width(8.dp))
@@ -568,51 +578,22 @@ private fun SoundManagerScreen(
                 }
             }
         } else {
-            LazyColumn(modifier = Modifier.fillMaxSize().padding(padding)) {
+            LazyColumn(
+                modifier = Modifier.fillMaxSize().padding(padding),
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
                 items(viewModel.uiState.customSounds, key = { it.id }) { sound ->
-                    Column {
-                        ListItem(
-                            headlineContent = { Text(sound.displayName, fontWeight = FontWeight.Medium) },
-                            supportingContent = {
-                                Text(
-                                    sound.categories.mapNotNull { id ->
-                                        SoundCatalog.targets.firstOrNull { it.id == id }?.title
-                                    }.joinToString("、"),
-                                    maxLines = 2,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            },
-                            trailingContent = {
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    SilentPreviewButton(
-                                        enabled = true,
-                                        onClick = {
-                                            viewModel.preview(sound).exceptionOrNull()?.let {
-                                                snackbar.launchMessage(it.message ?: "无法播放该声音")
-                                            }
-                                        },
-                                    )
-                                    IconButton(onClick = { viewModel.editCategories(sound) }) {
-                                        Icon(Icons.Rounded.Edit, contentDescription = "变更分类")
-                                    }
-                                    IconButton(onClick = { deleting = sound }) {
-                                        Icon(
-                                            Icons.Rounded.Delete,
-                                            contentDescription = "删除",
-                                            tint = MaterialTheme.colorScheme.error,
-                                        )
-                                    }
-                                }
-                            },
-                            colors = ListItemDefaults.colors(
-                                containerColor = MaterialTheme.colorScheme.surface,
-                            ),
-                        )
-                        HorizontalDivider(
-                            modifier = Modifier.padding(start = 16.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                        )
-                    }
+                    SoundAssetCard(
+                        sound = sound,
+                        onPreview = {
+                            viewModel.preview(sound).exceptionOrNull()?.let {
+                                snackbar.launchMessage(it.message ?: "无法播放该声音")
+                            }
+                        },
+                        onEdit = { viewModel.editCategories(sound) },
+                        onDelete = { deleting = sound },
+                    )
                 }
             }
         }
@@ -629,6 +610,95 @@ private fun SoundManagerScreen(
             },
             dismissButton = { TextButton(onClick = { deleting = null }) { Text("取消") } },
         )
+    }
+}
+
+@Composable
+private fun SoundAssetCard(
+    sound: SoundAsset,
+    onPreview: () -> Unit,
+    onEdit: () -> Unit,
+    onDelete: () -> Unit,
+) {
+    val visual = soundVisual(sound.categories.firstOrNull().orEmpty())
+    val categoryNames = sound.categories.mapNotNull { id ->
+        SoundCatalog.targets.firstOrNull { it.id == id }?.title
+    }.joinToString("、")
+
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.surfaceContainerLowest,
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(
+            width = 1.dp,
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.55f),
+        ),
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .heightIn(min = 128.dp)
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(52.dp)
+                    .clip(RoundedCornerShape(16.dp))
+                    .background(visual.containerColor),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    visual.icon,
+                    contentDescription = null,
+                    modifier = Modifier.size(28.dp),
+                    tint = visual.contentColor,
+                )
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    sound.displayName,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    categoryNames,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            }
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
+                SilentPreviewButton(
+                    enabled = true,
+                    containerColor = visual.containerColor,
+                    contentColor = visual.contentColor,
+                    onClick = onPreview,
+                )
+                Spacer(Modifier.height(8.dp))
+                Row {
+                    IconButton(modifier = Modifier.size(40.dp), onClick = onEdit) {
+                        Icon(Icons.Rounded.Edit, contentDescription = "变更分类")
+                    }
+                    IconButton(modifier = Modifier.size(40.dp), onClick = onDelete) {
+                        Icon(
+                            Icons.Rounded.Delete,
+                            contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -703,21 +773,25 @@ private fun SilentPreviewButton(
 @Composable
 private fun CategoryDialog(viewModel: AppViewModel, snackbar: SnackbarHostState) {
     val initial = viewModel.uiState.editingSound?.categories.orEmpty()
+    val isSaving = viewModel.uiState.isSavingSound
     var selected by remember(viewModel.uiState.pendingImport, viewModel.uiState.editingSound) {
         mutableStateOf(initial)
     }
     AlertDialog(
-        onDismissRequest = viewModel::cancelCategoryEdit,
+        onDismissRequest = { if (!isSaving) viewModel.cancelCategoryEdit() },
         title = { Text(if (viewModel.uiState.pendingImport != null) "选择声音分类" else "变更声音分类") },
         text = {
             Column {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { selected = SoundCatalog.targets.map { it.id }.toSet() }) {
+                    TextButton(
+                        enabled = !isSaving,
+                        onClick = { selected = SoundCatalog.targets.map { it.id }.toSet() },
+                    ) {
                         Icon(Icons.Rounded.SelectAll, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("全选")
                     }
-                    TextButton(onClick = { selected = emptySet() }) {
+                    TextButton(enabled = !isSaving, onClick = { selected = emptySet() }) {
                         Icon(Icons.Rounded.Close, null, modifier = Modifier.size(18.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("全不选")
@@ -726,13 +800,14 @@ private fun CategoryDialog(viewModel: AppViewModel, snackbar: SnackbarHostState)
                 LazyColumn(modifier = Modifier.fillMaxWidth().height(360.dp)) {
                     items(SoundCatalog.targets, key = { it.id }) { target ->
                         Row(
-                            modifier = Modifier.fillMaxWidth().clickable {
+                            modifier = Modifier.fillMaxWidth().clickable(enabled = !isSaving) {
                                 selected = if (target.id in selected) selected - target.id else selected + target.id
                             }.padding(vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Checkbox(
                                 checked = target.id in selected,
+                                enabled = !isSaving,
                                 onCheckedChange = { checked ->
                                     selected = if (checked) selected + target.id else selected - target.id
                                 },
@@ -744,13 +819,26 @@ private fun CategoryDialog(viewModel: AppViewModel, snackbar: SnackbarHostState)
             }
         },
         confirmButton = {
-            TextButton(onClick = {
-                viewModel.confirmCategories(selected).exceptionOrNull()?.let {
-                    snackbar.launchMessage(it.message ?: "保存失败")
+            TextButton(
+                enabled = !isSaving,
+                onClick = {
+                    viewModel.confirmCategories(selected) { result ->
+                        result.exceptionOrNull()?.let {
+                            snackbar.launchMessage(it.message ?: "保存失败")
+                        }
+                    }
+                },
+            ) {
+                if (isSaving) {
+                    CircularProgressIndicator(modifier = Modifier.size(18.dp), strokeWidth = 2.dp)
+                } else {
+                    Text("保存")
                 }
-            }) { Text("保存") }
+            }
         },
-        dismissButton = { TextButton(onClick = viewModel::cancelCategoryEdit) { Text("取消") } },
+        dismissButton = {
+            TextButton(enabled = !isSaving, onClick = viewModel::cancelCategoryEdit) { Text("取消") }
+        },
     )
 }
 

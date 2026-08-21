@@ -13,6 +13,9 @@ class SoundRepository(private val context: Context) {
     private val preferences = context.getSharedPreferences("sound_studio", Context.MODE_PRIVATE)
     private val soundDirectory = File(context.filesDir, "sounds").apply { mkdirs() }
 
+    val supportsAudioConversion: Boolean
+        get() = OggAudioTranscoder.isAvailable
+
     fun loadCustomSounds(): List<SoundAsset> {
         val raw = preferences.getString(KEY_SOUNDS, null) ?: return emptyList()
         return runCatching {
@@ -48,12 +51,26 @@ class SoundRepository(private val context: Context) {
         val id = UUID.randomUUID().toString()
         val fileName = "$id.ogg"
         val destination = File(soundDirectory, fileName)
-        context.contentResolver.openInputStream(uri).use { input ->
-            requireNotNull(input) { "无法读取所选文件" }
-            destination.outputStream().use { output -> input.copyTo(output) }
+        if (isOggFile(displayName)) {
+            copyUri(uri, destination)
+        } else {
+            check(OggAudioTranscoder.isAvailable) { "当前设备仅支持导入 OGG 音频" }
+            val source = File.createTempFile("sound_import_", ".audio", context.cacheDir)
+            try {
+                copyUri(uri, source)
+                OggAudioTranscoder.transcode(source, destination)
+            } catch (error: Throwable) {
+                destination.delete()
+                throw error
+            } finally {
+                source.delete()
+            }
         }
-        return SoundAsset(id, displayName.removeSuffix(".ogg"), fileName, categories)
+        return SoundAsset(id, displayName.substringBeforeLast('.', displayName), fileName, categories)
     }
+
+    fun supportsImport(displayName: String): Boolean =
+        isSupportedAudioFile(displayName) && (isOggFile(displayName) || OggAudioTranscoder.isAvailable)
 
     fun saveSounds(sounds: List<SoundAsset>) {
         val array = JSONArray()
@@ -83,8 +100,33 @@ class SoundRepository(private val context: Context) {
         File(soundDirectory, sound.storedFileName).inputStream()
     }
 
+    private fun copyUri(uri: Uri, destination: File) {
+        context.contentResolver.openInputStream(uri).use { input ->
+            requireNotNull(input) { "无法读取所选文件" }
+            destination.outputStream().use { output -> input.copyTo(output) }
+        }
+    }
+
     companion object {
         private const val KEY_SOUNDS = "custom_sounds"
         private const val KEY_SELECTIONS = "selections"
+
+        private val SUPPORTED_EXTENSIONS = setOf(
+            "ogg",
+            "oga",
+            "opus",
+            "mp3",
+            "wav",
+            "wave",
+            "m4a",
+            "aac",
+            "flac",
+        )
+
+        fun isSupportedAudioFile(displayName: String): Boolean =
+            displayName.substringAfterLast('.', "").lowercase() in SUPPORTED_EXTENSIONS
+
+        fun isOggFile(displayName: String): Boolean =
+            displayName.substringAfterLast('.', "").lowercase() in setOf("ogg", "oga", "opus")
     }
 }

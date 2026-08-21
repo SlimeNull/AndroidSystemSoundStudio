@@ -7,17 +7,22 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.AndroidViewModel
+import androidx.lifecycle.viewModelScope
 import com.slimenull.androidsystemsoundstudio.data.ModuleExporter
 import com.slimenull.androidsystemsoundstudio.data.SoundRepository
 import com.slimenull.androidsystemsoundstudio.model.SoundAsset
 import com.slimenull.androidsystemsoundstudio.model.SoundCatalog
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 data class AppUiState(
     val customSounds: List<SoundAsset> = emptyList(),
     val selections: Map<String, String> = emptyMap(),
     val pendingImport: PendingImport? = null,
     val editingSound: SoundAsset? = null,
+    val isSavingSound: Boolean = false,
 )
 
 data class PendingImport(val uri: Uri, val displayName: String)
@@ -39,6 +44,9 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
     val allSounds: List<SoundAsset>
         get() = SoundCatalog.builtIns() + uiState.customSounds
 
+    val supportsAudioConversion: Boolean
+        get() = repository.supportsAudioConversion
+
     fun select(targetId: String, soundId: String?) {
         val updated = uiState.selections.toMutableMap().apply {
             if (soundId == null) remove(targetId) else put(targetId, soundId)
@@ -51,7 +59,13 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         uiState = uiState.copy(pendingImport = PendingImport(uri, displayName))
     }
 
+    fun isSupportedAudioFile(displayName: String): Boolean =
+        SoundRepository.isSupportedAudioFile(displayName)
+
+    fun supportsImport(displayName: String): Boolean = repository.supportsImport(displayName)
+
     fun cancelCategoryEdit() {
+        if (uiState.isSavingSound) return
         uiState = uiState.copy(pendingImport = null, editingSound = null)
     }
 
@@ -59,23 +73,50 @@ class AppViewModel(application: Application) : AndroidViewModel(application) {
         uiState = uiState.copy(editingSound = sound)
     }
 
-    fun confirmCategories(categories: Set<String>): Result<Unit> = runCatching {
-        require(categories.isNotEmpty()) { "请至少选择一个分类" }
+    fun confirmCategories(categories: Set<String>, onComplete: (Result<Unit>) -> Unit) {
+        if (uiState.isSavingSound) return
+        if (categories.isEmpty()) {
+            onComplete(Result.failure(IllegalArgumentException("请至少选择一个分类")))
+            return
+        }
         val pending = uiState.pendingImport
         val editing = uiState.editingSound
-        val updated = when {
-            pending != null -> uiState.customSounds + repository.importSound(
-                pending.uri,
-                pending.displayName,
-                categories,
-            )
-            editing != null -> uiState.customSounds.map {
-                if (it.id == editing.id) it.copy(categories = categories) else it
-            }
-            else -> return@runCatching
+        if (pending == null && editing == null) {
+            onComplete(Result.success(Unit))
+            return
         }
-        repository.saveSounds(updated)
-        uiState = uiState.copy(customSounds = updated, pendingImport = null, editingSound = null)
+        val existingSounds = uiState.customSounds
+        uiState = uiState.copy(isSavingSound = true)
+
+        viewModelScope.launch {
+            val result = runCatching {
+                withContext(Dispatchers.IO) {
+                    val updated = when {
+                        pending != null -> existingSounds + repository.importSound(
+                            pending.uri,
+                            pending.displayName,
+                            categories,
+                        )
+                        else -> existingSounds.map {
+                            if (it.id == editing?.id) it.copy(categories = categories) else it
+                        }
+                    }
+                    repository.saveSounds(updated)
+                    updated
+                }
+            }
+            result.onSuccess { updated ->
+                uiState = uiState.copy(
+                    customSounds = updated,
+                    pendingImport = null,
+                    editingSound = null,
+                    isSavingSound = false,
+                )
+            }.onFailure {
+                uiState = uiState.copy(isSavingSound = false)
+            }
+            onComplete(result.map { Unit })
+        }
     }
 
     fun delete(sound: SoundAsset) {
